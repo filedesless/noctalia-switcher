@@ -1,0 +1,12 @@
+{
+  "settings": {
+    "pinned": {
+      "label": "Pinned apps",
+      "description": "One per line: key, app_id, then the command to launch it (defaults to the app_id), e.g. \"z zen-beta\". A pinned app's windows are labelled with its key; when it isn't running, the key launches it."
+    },
+    "hint_chars": {
+      "label": "Label letters",
+      "description": "Letters used to label the other windows, best first. Pinned keys are left out."
+    }
+  }
+}

@@ -1,0 +1,57 @@
+# Switcher: jump to any window on niri by typing its label.
+#
+# The panel draws a minimap of every monitor's workspaces with their
+# windows as tiles, each labelled with one or two letters (helix goto_word
+# style). Typing a label focuses that window. Pinned apps keep a fixed
+# first letter, and a pinned app that isn't running sits in a dock row,
+# where its letter launches it.
+
+id = "filedesless/switcher"
+name = "Switcher"
+version = "0.1.0"
+plugin_api = 26
+author = "filedesless"
+license = "MIT"
+icon = "layout-grid"
+description = "Jump to any niri window from a minimap of all workspaces by typing its label; pinned apps get fixed letters and launch when not running."
+tags = ["launcher", "panel", "service", "niri", "productivity"]
+dependencies = ["niri"]
+
+# "key app_id [command...]", e.g. "z zen-beta" or "o md.obsidian.Obsidian
+# obsidian". The command defaults to the app_id.
+[[setting]]
+key = "pinned"
+type = "string_list"
+label_key = "settings.pinned.label"
+description_key = "settings.pinned.description"
+default = []
+
+# Letters for the other windows' labels, best first. Pinned keys are
+# taken out of it.
+[[setting]]
+key = "hint_chars"
+type = "string"
+label_key = "settings.hint_chars.label"
+description_key = "settings.hint_chars.description"
+default = "asdfghjklqwertyuiopzxcvbnm"
+
+# Open with: noctalia msg panel-toggle filedesless/switcher:panel
+[[panel]]
+id = "panel"
+entry = "panel.luau"
+width = 1240
+height = 720
+placement = "floating"
+position = "center"
+keyboard_focus = "exclusive"
+capture_keys = [
+  "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+  "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+  "backspace", "escape",
+]
+
+# Keeps a live copy of niri's windows and workspaces (from its event
+# stream) in "switcher.snapshot", so the panel opens without waiting on IPC.
+[[service]]
+id = "service"
+entry = "service.luau"
