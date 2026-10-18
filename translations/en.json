@@ -7,6 +7,14 @@
     "hint_chars": {
       "label": "Label letters",
       "description": "Letters used to label the other windows, best first. Pinned keys are left out."
+    },
+    "previews": {
+      "label": "Window previews",
+      "description": "Show each window's last on-screen capture (taken with grim shortly after focus or layout changes). Windows not seen since login show their icon."
+    },
+    "gaps": {
+      "label": "niri gaps",
+      "description": "The gaps value of niri's layout, used to work out where tiled windows are on screen."
     }
   }
 }

@@ -10,6 +10,7 @@
 -- letters: one letter each while they suffice, two for all of them after.
 
 local SNAPSHOT = "switcher.snapshot"
+local OPEN_KEY = "switcher.open"
 -- Must match [[panel]] width/height in plugin.toml.
 local PANEL_W, PANEL_H = 1400, 880
 local PAD = 16
@@ -17,11 +18,12 @@ local HEADER_H, DOCK_H, OUTPUT_LABEL_H = 34, 44, 22
 local OUTPUT_GAP = 16
 local ROW_GAP = 8
 local TILE_GAP = 6
-local WS_LABEL_W = 48
-local TILE_MIN_W, TILE_MAX_W = 28, 340
-local ROW_MIN_H, ROW_MAX_H = 26, 110
--- Below this a tile drops its title and shows just the icon and label.
-local FULL_TILE_W, FULL_TILE_H = 96, 54
+local WS_LABEL_W = 36
+local ROW_MIN_H, ROW_MAX_H = 26, 240
+local FOOT_H = 22 -- a preview tile's strip with icon, label and title
+local TILE_PAD = 3
+local MIN_IMG_H = 36 -- below this, tiles go compact: no preview
+local COMPACT_MIN_W, COMPACT_MAX_W = 34, 200
 
 local snapshot = nil
 local typed = ""
@@ -233,12 +235,36 @@ local function act(target)
   end
 end
 
-local function tile(w, label, width, height)
+local function aspectOf(w)
+  local size = w.wsize or w.size
+  if size and size[2] and size[2] > 0 then
+    return size[1] / size[2]
+  end
+  return 16 / 10
+end
+
+local function previewOf(w)
+  local previews = snapshot and snapshot.previews
+  return previews and previews["w" .. tostring(w.id)] or nil
+end
+
+-- A tile of the given height: with an image area (the window's last
+-- capture, or its icon) sized to the window's aspect ratio when there's
+-- room, else compact (icon and label).
+local function tileSize(w, height)
+  local imgH = height - FOOT_H - 2 * TILE_PAD
+  if imgH >= MIN_IMG_H then
+    return math.floor(imgH * aspectOf(w)) + 2 * TILE_PAD, imgH
+  end
+  return math.max(COMPACT_MIN_W, math.min(COMPACT_MAX_W, math.floor(height * aspectOf(w)))), nil
+end
+
+local function tile(w, label, height)
   local dim = typed ~= "" and not matches(label)
-  local compact = width < FULL_TILE_W or height < FULL_TILE_H
+  local width, imgH = tileSize(w, height)
   local path = icon(w.app_id)
   local content
-  if compact then
+  if imgH == nil then
     content = {
       ui.row({ gap = 4, align = "center", justify = "center", flexGrow = 1 }, {
         ui.image({ path = path, width = 16, height = 16, fit = "contain", visible = path ~= nil and width >= 64 }),
@@ -246,13 +272,23 @@ local function tile(w, label, width, height)
       }),
     }
   else
+    local imgW = width - 2 * TILE_PAD
+    local preview = previewOf(w)
+    local picture
+    if preview then
+      picture = ui.image({ key = preview, path = preview, width = imgW, height = imgH, radius = 4, fit = "contain" })
+    else
+      local size = math.min(48, math.floor(imgH * 0.6))
+      picture = ui.row({ width = imgW, height = imgH, align = "center", justify = "center", radius = 4, fill = "surface/0.35" }, {
+        ui.image({ path = path, width = size, height = size, fit = "contain", visible = path ~= nil }),
+      })
+    end
     content = {
-      ui.row({ gap = 6, align = "center" }, {
-        ui.image({ path = path, width = 18, height = 18, fit = "contain", visible = path ~= nil }),
+      picture,
+      ui.row({ gap = 5, align = "center", height = FOOT_H, paddingH = 2 }, {
+        label and badge(label, false) or ui.spacer({}),
+        ui.image({ path = path, width = 14, height = 14, fit = "contain", visible = path ~= nil }),
         ui.label({ text = w.title ~= "" and w.title or w.app_id, fontSize = 11, color = "on_surface_variant", maxLines = 1, flexGrow = 1 }),
-      }),
-      ui.row({ justify = "center", align = "center", flexGrow = 1 }, {
-        label and badge(label, true) or ui.spacer({}),
       }),
     }
   end
@@ -260,9 +296,9 @@ local function tile(w, label, width, height)
     key = "w" .. w.id,
     width = width,
     height = height,
-    padding = compact and 3 or 6,
-    gap = 4,
-    radius = compact and 6 or 8,
+    padding = TILE_PAD,
+    gap = 0,
+    radius = 7,
     fill = w.is_focused and "primary/0.16" or "surface_variant/0.55",
     border = w.is_focused and "primary" or "outline/0.35",
     borderWidth = w.is_focused and 2 or 1,
@@ -273,10 +309,26 @@ local function tile(w, label, width, height)
   }, content)
 end
 
+-- The row's width at a given height: each column as wide as its widest
+-- tile, a column's stacked tiles sharing the height.
+local function rowWidth(columns, rowH)
+  local total = TILE_GAP * math.max(0, #columns - 1)
+  for _, column in ipairs(columns) do
+    local k = #column
+    local tileH = math.floor((rowH - TILE_GAP * (k - 1)) / k)
+    local widest = 0
+    for _, w in ipairs(column) do
+      widest = math.max(widest, (tileSize(w, tileH)))
+    end
+    total += widest
+  end
+  return total
+end
+
 -- Fits everything in the panel: each monitor gets an equal share of the
--- width and its workspaces an equal share of the height (within limits).
--- Tiles keep their windows' relative widths, at one scale per monitor,
--- shrunk further for a row that would overflow.
+-- width and its workspaces an equal share of the height. Tiles keep their
+-- windows' aspect ratios; a row too wide for its monitor's share gets
+-- shorter as a whole instead of squeezed.
 local function render()
   local model = layoutModel()
   local labels = assignLabels(model)
@@ -313,55 +365,73 @@ local function render()
   local blocks = {}
   for _, entry in ipairs(model) do
     local n = math.max(1, #entry.workspaces)
-    local rowH = math.floor((availH - ROW_GAP * (n - 1)) / n)
-    rowH = math.max(ROW_MIN_H, math.min(ROW_MAX_H, rowH))
 
-    local widest = 1
-    for _, row in ipairs(entry.workspaces) do
-      local width = 0
-      for _, column in ipairs(row.columns) do
-        width += (column[1].size and column[1].size[1] or 800)
+    -- How a row of one workspace comes out in a cell of the given size:
+    -- its height (shrunk until it fits the width) and the tiles' area.
+    local function fitRow(row, cellW, cellH)
+      local rowH = cellH
+      local width = rowWidth(row.columns, rowH)
+      local tries = 0
+      while width > cellW and rowH > ROW_MIN_H and tries < 6 do
+        rowH = math.max(ROW_MIN_H, math.floor(rowH * cellW / width))
+        width = rowWidth(row.columns, rowH)
+        tries += 1
       end
-      widest = math.max(widest, width)
+      return rowH, width * rowH
     end
-    local scale = math.min(0.25, availW / widest)
 
-    local rows = {}
+    -- Workspaces go in a grid, g per line; g is the one that gives the
+    -- tiles the most area (many small workspaces: several per line).
+    local best, bestArea = 1, -1
+    for g = 1, 4 do
+      local lines = math.ceil(n / g)
+      local cellW = math.floor((availW + WS_LABEL_W + TILE_GAP - OUTPUT_GAP * (g - 1)) / g) - WS_LABEL_W - TILE_GAP
+      local cellH = math.max(ROW_MIN_H, math.min(ROW_MAX_H, math.floor((availH - ROW_GAP * (lines - 1)) / lines)))
+      local area = 0
+      for _, row in ipairs(entry.workspaces) do
+        local _, a = fitRow(row, cellW, cellH)
+        area += a
+      end
+      if cellW > 40 and area > bestArea * 1.05 then
+        best, bestArea = g, area
+      end
+    end
+    local g = best
+    local lines = math.ceil(n / g)
+    local cellW = math.floor((availW + WS_LABEL_W + TILE_GAP - OUTPUT_GAP * (g - 1)) / g) - WS_LABEL_W - TILE_GAP
+    local cellH = math.max(ROW_MIN_H, math.min(ROW_MAX_H, math.floor((availH - ROW_GAP * (lines - 1)) / lines)))
+
+    local cells = {}
     for _, row in ipairs(entry.workspaces) do
-      local widths, total = {}, TILE_GAP * math.max(0, #row.columns - 1)
-      for i, column in ipairs(row.columns) do
-        local size = column[1].size or { 800, 600 }
-        widths[i] = math.max(TILE_MIN_W, math.min(TILE_MAX_W, math.floor(size[1] * scale)))
-        total += widths[i]
-      end
-      if total > availW then
-        local gaps = TILE_GAP * math.max(0, #row.columns - 1)
-        local factor = (availW - gaps) / math.max(1, total - gaps)
-        for i in ipairs(widths) do
-          widths[i] = math.max(TILE_MIN_W, math.floor(widths[i] * factor))
-        end
-      end
-
+      local rowH = fitRow(row, cellW, cellH)
       local cols = {}
-      for i, column in ipairs(row.columns) do
+      for _, column in ipairs(row.columns) do
         local k = #column
-        local height = math.floor((rowH - TILE_GAP * (k - 1)) / k)
+        local tileH = math.max(18, math.floor((rowH - TILE_GAP * (k - 1)) / k))
         local stacked = {}
         for _, w in ipairs(column) do
-          table.insert(stacked, tile(w, labels[w.id], widths[i], math.max(18, height)))
+          table.insert(stacked, tile(w, labels[w.id], tileH))
         end
         table.insert(cols, ui.column({ gap = TILE_GAP }, stacked))
       end
       local ws = row.ws
-      table.insert(rows, ui.row({ gap = TILE_GAP, align = "center", height = rowH }, {
+      table.insert(cells, ui.row({ gap = TILE_GAP, align = "center", width = cellW + WS_LABEL_W + TILE_GAP, height = cellH }, {
         ui.label({ text = ws.name or tostring(ws.idx or ""), width = WS_LABEL_W, fontSize = 11, fontWeight = ws.is_active and "bold" or "normal", color = ws.is_active and "primary" or "on_surface_variant", maxLines = 1 }),
-        ui.row({ gap = TILE_GAP }, cols),
+        ui.row({ gap = TILE_GAP, align = "center" }, cols),
       }))
+    end
+    local gridLines = {}
+    for i = 1, #cells, g do
+      local line = {}
+      for j = i, math.min(i + g - 1, #cells) do
+        table.insert(line, cells[j])
+      end
+      table.insert(gridLines, ui.row({ gap = OUTPUT_GAP }, line))
     end
     local o = entry.output
     table.insert(blocks, ui.column({ width = blockW, gap = ROW_GAP }, {
       ui.label({ text = o.name or "", fontSize = 12, fontWeight = "bold", color = o.focused and "primary" or "on_surface_variant" }),
-      ui.column({ gap = ROW_GAP }, rows),
+      ui.column({ gap = ROW_GAP }, gridLines),
     }))
   end
 
@@ -392,10 +462,15 @@ noctalia.state.watch(SNAPSHOT, function(value)
 end)
 
 function onOpen()
+  noctalia.state.set(OPEN_KEY, true)
   loadPinned()
   snapshot = noctalia.state.get(SNAPSHOT)
   typed = ""
   render()
+end
+
+function onClose()
+  noctalia.state.set(OPEN_KEY, false)
 end
 
 function onKey(chord, pressed)

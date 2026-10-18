@@ -18,6 +18,29 @@ label focuses that window and closes the panel.
   (`hint_chars`, home row first): one letter each while they suffice, two
   for all of them after, so no label is a prefix of another.
 
+## Previews
+
+Each tile shows the window's last capture, at the window's aspect ratio. A
+monitor's workspaces share the panel's height, several per line when there
+are many; a row too wide for its cell gets shorter as a whole rather than
+squeezed, and tiles too small for a picture show just the icon and label.
+
+niri can't capture a window that isn't on screen (no
+ext-image-copy-capture), and its `screenshot-window` action always copies
+to the clipboard. So the service captures windows with `grim` (wlr
+screencopy) while they're on screen, 0.7 s after things settle and at most
+every 1.5 s, into `$XDG_RUNTIME_DIR/noctalia-switcher/`. Nothing is
+captured while the panel is open or the session is locked. A window that
+hasn't been on screen since Noctalia started shows its icon.
+
+niri's IPC gives on-screen positions only for floating windows, so tiled
+ones are worked out from the layout, assuming no struts and the work area's
+insets split evenly between top and bottom (equal bars). When a
+workspace's columns all fit on screen, nothing scrolls and they sit left to
+right; otherwise only the active window's column is certain (full width,
+first or last). Set `gaps` to niri's `layout { gaps }` if it isn't the
+default 16, or turn `previews` off.
+
 The service follows `niri msg --json event-stream` and keeps the windows
 and workspaces in shared state, so the panel opens without waiting on IPC.
 That approach comes from teagar/niri-workspace-preview.
@@ -55,6 +78,8 @@ pinned = [
 ]
 # Letters for the other windows' labels, best first.
 hint_chars = "asdfghjklqwertyuiopzxcvbnm"
+previews = true
+gaps = 16 # niri's layout gaps
 ```
 
 Find an app's `app_id` with `niri msg windows`.

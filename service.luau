@@ -3,8 +3,18 @@
 -- (a full state first, then changes) and publishes them as
 -- "switcher.snapshot" for the panel. Approach borrowed from
 -- teagar/niri-workspace-preview's service.
+--
+-- Previews: niri can't capture a window that isn't on screen (no
+-- ext-image-copy-capture), and its screenshot-window action always copies
+-- to the clipboard. So shortly after things settle, grim captures each
+-- window that is on screen where its position can be worked out, and the
+-- panel shows the last capture. IPC gives on-screen positions only for
+-- floating windows; tiled ones are laid out here from the layout (see
+-- tiledRects), assuming no struts and work-area insets split evenly
+-- between top and bottom.
 
 local STATE_KEY = "switcher.snapshot"
+local OPEN_KEY = "switcher.open"
 local STREAM = [[
 delay=1
 while :; do
@@ -13,6 +23,34 @@ while :; do
   if [ "$delay" -lt 16 ]; then delay=$((delay * 2)); else delay=30; fi
 done
 ]]
+-- Args: dir, then "id x y w h scale" per window. Skips everything while the
+-- session is locked (the lock screen would be captured instead). Prints
+-- "id path" per capture and deletes that window's older ones.
+local CAPTURE = [[
+dir=$1; shift
+mkdir -p -m 700 "$dir" || exit 1
+s=$(loginctl show-user "$(id -un)" -p Display --value 2>/dev/null)
+[ -n "$s" ] && [ "$(loginctl show-session "$s" -p LockedHint --value)" = yes ] && exit 0
+stamp=$(date +%s%N)
+while [ $# -ge 6 ]; do
+  id=$1 x=$2 y=$3 w=$4 h=$5 sc=$6; shift 6
+  f=$dir/$id-$stamp.jpg
+  if grim -g "$x,$y ${w}x$h" -s "$sc" -t jpeg -q 75 "$f" 2>/dev/null; then
+    for old in "$dir/$id"-*.jpg; do [ "$old" = "$f" ] || rm -f "$old"; done
+    echo "$id $f"
+  fi
+done
+]]
+
+local PREVIEW_W = 480 -- px, thumbnail width
+local SETTLE_MS = 700 -- after the last change, before capturing
+local MIN_GAP_MS = 1500 -- between two captures
+local ICONS_PER_CALL = 2
+local IDLE_MS, BUSY_MS = 60000, 100
+
+local previewsOn = noctalia.getConfig("previews") ~= false
+local GAP = tonumber(noctalia.getConfig("gaps")) or 16
+local dir = (noctalia.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/noctalia-switcher"
 
 local workspaces = {}
 local windows = {}
@@ -20,6 +58,12 @@ local windows = {}
 -- a time as apps appear, because resolving them all in the panel's onOpen
 -- can exceed its CPU budget.
 local icons = {}
+local previews = {} -- "w<id>" -> jpeg path
+local niriOutputs = {} -- name -> logical { x, y, width, height }
+local captureDue = nil
+local capturing = false
+local lastCapture = 0
+local panelOpen = false
 
 local function findById(values, id)
   for index, value in ipairs(values) do
@@ -46,6 +90,9 @@ local function normalizeWindow(w, previous)
     is_floating = w.is_floating == true,
     pos = layout.pos_in_scrolling_layout,
     size = layout.tile_size or previous.size,
+    wsize = layout.window_size or previous.wsize,
+    offset = layout.window_offset_in_tile or previous.offset,
+    tile_pos = layout.tile_pos_in_workspace_view,
   }
 end
 
@@ -57,6 +104,7 @@ local function normalizeWorkspace(ws)
     output = ws.output,
     is_active = ws.is_active == true,
     is_focused = ws.is_focused == true,
+    active_window_id = ws.active_window_id,
   }
 end
 
@@ -74,11 +122,8 @@ local function outputs()
   return result
 end
 
-local ICONS_PER_CALL = 2
-local IDLE_MS, BUSY_MS = 60000, 50
-
 local function publish()
-  noctalia.state.set(STATE_KEY, { outputs = outputs(), workspaces = workspaces, windows = windows, icons = icons })
+  noctalia.state.set(STATE_KEY, { outputs = outputs(), workspaces = workspaces, windows = windows, icons = icons, previews = previews })
 end
 
 -- Resolves up to ICONS_PER_CALL missing icons; true if some are still
@@ -98,19 +143,214 @@ local function resolveIcons()
   return false
 end
 
+local function iconsPending()
+  for _, w in ipairs(windows) do
+    if w.app_id ~= "" and icons[w.app_id] == nil then
+      return true
+    end
+  end
+  return false
+end
+
+local function tick()
+  noctalia.setUpdateInterval((iconsPending() or captureDue ~= nil) and BUSY_MS or IDLE_MS)
+end
+
 local function refresh()
-  local pending = resolveIcons()
+  resolveIcons()
   publish()
-  noctalia.setUpdateInterval(pending and BUSY_MS or IDLE_MS)
+  tick()
+end
+
+local function scheduleCapture()
+  if previewsOn then
+    captureDue = noctalia.nowMs() + SETTLE_MS
+    tick()
+  end
+end
+
+-- On-screen rects (logical, output-relative) of the tiled windows of one
+-- active workspace, where they're certain. With no struts and gaps G, a
+-- column's tiles fill the work area's height between gaps, which gives the
+-- work area (its insets split evenly, as with equal top and bottom bars).
+-- If all columns fit, nothing scrolls and they sit left to right from G.
+-- Otherwise only the active window's column is known for sure: when it is
+-- full width, the first column (at G) or the last (against the right edge).
+local function tiledRects(ws, list, out)
+  local columns, order = {}, {}
+  for _, w in ipairs(list) do
+    if w.pos and not w.is_floating and w.size then
+      local c = w.pos[1]
+      if columns[c] == nil then
+        columns[c] = {}
+        table.insert(order, c)
+      end
+      table.insert(columns[c], w)
+    end
+  end
+  table.sort(order)
+  if #order == 0 then
+    return {}
+  end
+
+  local widths, total = {}, -GAP
+  for _, c in ipairs(order) do
+    table.sort(columns[c], function(a, b)
+      return (a.pos[2] or 0) < (b.pos[2] or 0)
+    end)
+    local width = 0
+    for _, w in ipairs(columns[c]) do
+      width = math.max(width, w.size[1])
+    end
+    widths[c] = width
+    total += width + GAP
+  end
+
+  -- Fullscreen: the tile is the whole output.
+  local rects = {}
+  local areaW = out.width
+  local xs = {}
+  if total <= areaW - 2 * GAP then
+    local x = GAP
+    for _, c in ipairs(order) do
+      xs[c] = x
+      x += widths[c] + GAP
+    end
+  else
+    local active = nil
+    for _, w in ipairs(list) do
+      if w.id == ws.active_window_id and w.pos then
+        active = w.pos[1]
+      end
+    end
+    if active ~= nil then
+      if widths[active] >= areaW - 2 * GAP then
+        xs[active] = GAP
+      elseif active == order[1] then
+        xs[active] = GAP
+      elseif active == order[#order] then
+        xs[active] = areaW - GAP - widths[active]
+      end
+    end
+  end
+
+  for c, x in pairs(xs) do
+    local tiles = columns[c]
+    local used = GAP * (#tiles + 1)
+    for _, w in ipairs(tiles) do
+      used += w.size[2]
+    end
+    local top = math.floor((out.height - used) / 2) + GAP
+    local y = top
+    for _, w in ipairs(tiles) do
+      if w.size[1] >= out.width and w.size[2] >= out.height then
+        rects[w.id] = { 0, 0 }
+      else
+        rects[w.id] = { x, y }
+      end
+      y += w.size[2] + GAP
+    end
+  end
+  return rects
+end
+
+local function captureTargets()
+  local byWs = {}
+  for _, w in ipairs(windows) do
+    if w.workspace_id then
+      byWs[w.workspace_id] = byWs[w.workspace_id] or {}
+      table.insert(byWs[w.workspace_id], w)
+    end
+  end
+  local args = {}
+  for _, ws in ipairs(workspaces) do
+    local out = niriOutputs[ws.output]
+    local list = byWs[ws.id]
+    if ws.is_active and out and list then
+      local rects = tiledRects(ws, list, out)
+      for _, w in ipairs(list) do
+        if w.is_floating and w.tile_pos then
+          rects[w.id] = { w.tile_pos[1], w.tile_pos[2] }
+        end
+      end
+      for _, w in ipairs(list) do
+        local r = rects[w.id]
+        local size = w.wsize or w.size
+        if r and size then
+          local off = w.offset or { 0, 0 }
+          local x = math.floor(r[1] + off[1])
+          local y = math.floor(r[2] + off[2])
+          local width, height = math.floor(size[1]), math.floor(size[2])
+          -- Only windows wholly on their output.
+          if x >= 0 and y >= 0 and x + width <= out.width and y + height <= out.height and width > 0 and height > 0 then
+            for _, v in ipairs({
+              tostring(w.id),
+              tostring(out.x + x),
+              tostring(out.y + y),
+              tostring(width),
+              tostring(height),
+              string.format("%.4f", math.min(1, PREVIEW_W / width)),
+            }) do
+              table.insert(args, v)
+            end
+          end
+        end
+      end
+    end
+  end
+  return args
+end
+
+local function capture()
+  local args = captureTargets()
+  if #args == 0 then
+    return
+  end
+  capturing = true
+  lastCapture = noctalia.nowMs()
+  local argv = { "sh", "-c", CAPTURE, "sh", dir }
+  for _, a in ipairs(args) do
+    table.insert(argv, a)
+  end
+  noctalia.runAsync(argv, function(res)
+    capturing = false
+    for id, path in tostring(res.stdout or ""):gmatch("(%d+) (%S+)") do
+      previews["w" .. id] = path
+    end
+    publish()
+  end)
 end
 
 function update()
-  for _, w in ipairs(windows) do
-    if w.app_id ~= "" and icons[w.app_id] == nil then
-      refresh()
-      return
+  if iconsPending() then
+    resolveIcons()
+    publish()
+  end
+  if captureDue ~= nil and noctalia.nowMs() >= captureDue then
+    if panelOpen or capturing or noctalia.nowMs() - lastCapture < MIN_GAP_MS then
+      captureDue = noctalia.nowMs() + SETTLE_MS
+    else
+      captureDue = nil
+      capture()
     end
   end
+  tick()
+end
+
+local function loadOutputs()
+  noctalia.runAsync({ "niri", "msg", "--json", "outputs" }, function(res)
+    local decoded = noctalia.json.decode(res.stdout or "")
+    if type(decoded) ~= "table" then
+      return
+    end
+    niriOutputs = {}
+    for name, o in pairs(decoded) do
+      if type(o) == "table" and type(o.logical) == "table" then
+        niriOutputs[o.name or name] = o.logical
+      end
+    end
+    scheduleCapture()
+  end)
 end
 
 local function applyEvent(e)
@@ -132,6 +372,12 @@ local function applyEvent(e)
         ws.is_focused = ws.id == activated.id
       end
     end
+  elseif e.WorkspaceActiveWindowChanged then
+    local _, ws = findById(workspaces, e.WorkspaceActiveWindowChanged.workspace_id)
+    if ws == nil then
+      return false
+    end
+    ws.active_window_id = e.WorkspaceActiveWindowChanged.active_window_id
   elseif e.WindowsChanged then
     local previous = {}
     for _, w in ipairs(windows) do
@@ -162,9 +408,15 @@ local function applyEvent(e)
       table.insert(windows, n)
     end
   elseif e.WindowClosed then
-    local index = findById(windows, e.WindowClosed.id)
+    local id = e.WindowClosed.id
+    local index = findById(windows, id)
     if index then
       table.remove(windows, index)
+    end
+    local path = previews["w" .. tostring(id)]
+    if path then
+      previews["w" .. tostring(id)] = nil
+      noctalia.runAsync({ "rm", "-f", path })
     end
   elseif e.WindowFocusChanged then
     for _, w in ipairs(windows) do
@@ -177,6 +429,9 @@ local function applyEvent(e)
       if w and type(layout) == "table" then
         w.pos = layout.pos_in_scrolling_layout
         w.size = layout.tile_size or w.size
+        w.wsize = layout.window_size or w.wsize
+        w.offset = layout.window_offset_in_tile or w.offset
+        w.tile_pos = layout.tile_pos_in_workspace_view
       end
     end
   else
@@ -187,16 +442,27 @@ end
 
 publish()
 if noctalia.commandExists("niri") then
+  loadOutputs()
   noctalia.runStream(STREAM, function(line)
     local event = noctalia.json.decode(line)
     if type(event) == "table" and applyEvent(event) then
       refresh()
+      scheduleCapture()
     end
   end)
 else
   noctalia.log("switcher: niri not found on PATH")
 end
 
+-- The panel says when it's open: captures wait, so it isn't in them.
+noctalia.state.watch(OPEN_KEY, function(value)
+  panelOpen = value == true
+  if not panelOpen then
+    scheduleCapture()
+  end
+end)
+
 function onOutputsChanged()
   publish()
+  loadOutputs()
 end

@@ -15,7 +15,7 @@ license = "MIT"
 icon = "layout-grid"
 description = "Jump to any niri window from a minimap of all workspaces by typing its label; pinned apps get fixed letters and launch when not running."
 tags = ["launcher", "panel", "service", "niri", "productivity"]
-dependencies = ["niri"]
+dependencies = ["niri", "grim"]
 
 # "key app_id [command...]", e.g. "z zen-beta" or "o md.obsidian.Obsidian
 # obsidian". The command defaults to the app_id.
@@ -34,6 +34,26 @@ type = "string"
 label_key = "settings.hint_chars.label"
 description_key = "settings.hint_chars.description"
 default = "asdfghjklqwertyuiopzxcvbnm"
+
+# Window previews: grim captures windows while they're on screen, and the
+# panel shows the last capture.
+[[setting]]
+key = "previews"
+type = "bool"
+label_key = "settings.previews.label"
+description_key = "settings.previews.description"
+default = true
+
+# niri's layout gaps (its default is 16), to work out where tiled windows
+# are on screen.
+[[setting]]
+key = "gaps"
+type = "int"
+label_key = "settings.gaps.label"
+description_key = "settings.gaps.description"
+default = 16
+min = 0
+max = 64
 
 # Open with: noctalia msg panel-toggle filedesless/switcher:panel
 [[panel]]
