@@ -10,13 +10,18 @@
 -- letters: one letter each while they suffice, two for all of them after.
 
 local SNAPSHOT = "switcher.snapshot"
-local PANEL_W = 1240
+-- Must match [[panel]] width/height in plugin.toml.
+local PANEL_W, PANEL_H = 1400, 880
 local PAD = 16
+local HEADER_H, DOCK_H, OUTPUT_LABEL_H = 34, 44, 22
 local OUTPUT_GAP = 16
+local ROW_GAP = 8
 local TILE_GAP = 6
-local WS_LABEL_W = 56
-local TILE_MIN_W, TILE_MAX_W = 72, 340
-local TILE_MIN_H, TILE_MAX_H = 56, 96
+local WS_LABEL_W = 48
+local TILE_MIN_W, TILE_MAX_W = 28, 340
+local ROW_MIN_H, ROW_MAX_H = 26, 110
+-- Below this a tile drops its title and shows just the icon and label.
+local FULL_TILE_W, FULL_TILE_H = 96, 54
 
 local snapshot = nil
 local typed = ""
@@ -68,7 +73,13 @@ local function hintAlphabet()
   return letters
 end
 
+-- Icons come resolved from the service; pinned apps that aren't running
+-- are looked up here (a handful, cached).
 local function icon(appId)
+  local known = snapshot and snapshot.icons and snapshot.icons[appId]
+  if known ~= nil then
+    return known or nil
+  end
   if iconCache[appId] == nil then
     iconCache[appId] = noctalia.appIconPath(appId, 32) or false
   end
@@ -224,13 +235,34 @@ end
 
 local function tile(w, label, width, height)
   local dim = typed ~= "" and not matches(label)
+  local compact = width < FULL_TILE_W or height < FULL_TILE_H
+  local path = icon(w.app_id)
+  local content
+  if compact then
+    content = {
+      ui.row({ gap = 4, align = "center", justify = "center", flexGrow = 1 }, {
+        ui.image({ path = path, width = 16, height = 16, fit = "contain", visible = path ~= nil and width >= 64 }),
+        label and badge(label, false) or ui.spacer({}),
+      }),
+    }
+  else
+    content = {
+      ui.row({ gap = 6, align = "center" }, {
+        ui.image({ path = path, width = 18, height = 18, fit = "contain", visible = path ~= nil }),
+        ui.label({ text = w.title ~= "" and w.title or w.app_id, fontSize = 11, color = "on_surface_variant", maxLines = 1, flexGrow = 1 }),
+      }),
+      ui.row({ justify = "center", align = "center", flexGrow = 1 }, {
+        label and badge(label, true) or ui.spacer({}),
+      }),
+    }
+  end
   return ui.column({
     key = "w" .. w.id,
     width = width,
     height = height,
-    padding = 6,
+    padding = compact and 3 or 6,
     gap = 4,
-    radius = 8,
+    radius = compact and 6 or 8,
     fill = w.is_focused and "primary/0.16" or "surface_variant/0.55",
     border = w.is_focused and "primary" or "outline/0.35",
     borderWidth = w.is_focused and 2 or 1,
@@ -238,65 +270,16 @@ local function tile(w, label, width, height)
     onClick = function()
       act({ kind = "window", id = w.id })
     end,
-  }, {
-    ui.row({ gap = 6, align = "center" }, {
-      ui.image({ path = icon(w.app_id), width = 18, height = 18, fit = "contain", visible = icon(w.app_id) ~= nil }),
-      ui.label({ text = w.title ~= "" and w.title or w.app_id, fontSize = 11, color = "on_surface_variant", maxLines = 1, flexGrow = 1 }),
-    }),
-    ui.row({ justify = "center", align = "center", flexGrow = 1 }, {
-      label and badge(label, true) or ui.spacer({}),
-    }),
-  })
+  }, content)
 end
 
+-- Fits everything in the panel: each monitor gets an equal share of the
+-- width and its workspaces an equal share of the height (within limits).
+-- Tiles keep their windows' relative widths, at one scale per monitor,
+-- shrunk further for a row that would overflow.
 local function render()
   local model = layoutModel()
   local labels = assignLabels(model)
-
-  local blocks = {}
-  local blockW = math.floor((PANEL_W - 2 * PAD - OUTPUT_GAP * math.max(0, #model - 1)) / math.max(1, #model))
-  for _, entry in ipairs(model) do
-    -- One scale per monitor, so its rows stay comparable: the widest row
-    -- fits the block, within the tile size limits.
-    local widest = 1
-    for _, row in ipairs(entry.workspaces) do
-      local width = 0
-      for _, column in ipairs(row.columns) do
-        width += (column[1].size and column[1].size[1] or 800)
-      end
-      widest = math.max(widest, width)
-    end
-    local avail = blockW - WS_LABEL_W - TILE_GAP * 6
-    local scale = math.min(0.25, avail / widest)
-
-    local rows = {}
-    for _, row in ipairs(entry.workspaces) do
-      local cols = {}
-      for _, column in ipairs(row.columns) do
-        local size = column[1].size or { 800, 600 }
-        local width = math.max(TILE_MIN_W, math.min(TILE_MAX_W, math.floor(size[1] * scale)))
-        local stacked = {}
-        for _, w in ipairs(column) do
-          local h = (w.size and w.size[2] or 600) * scale / #column
-          local height = math.max(TILE_MIN_H, math.min(TILE_MAX_H, math.floor(h)))
-          table.insert(stacked, tile(w, labels[w.id], width, height))
-        end
-        table.insert(cols, ui.column({ gap = TILE_GAP }, stacked))
-      end
-      local ws = row.ws
-      table.insert(rows, ui.row({ gap = TILE_GAP, align = "center" }, {
-        ui.column({ width = WS_LABEL_W, gap = 2 }, {
-          ui.label({ text = ws.name or tostring(ws.idx or ""), fontSize = 12, fontWeight = ws.is_active and "bold" or "normal", color = ws.is_active and "primary" or "on_surface_variant", maxLines = 1 }),
-        }),
-        ui.row({ gap = TILE_GAP }, cols),
-      }))
-    end
-    local o = entry.output
-    table.insert(blocks, ui.column({ width = blockW, gap = 10 }, {
-      ui.label({ text = o.name or "", fontSize = 12, fontWeight = "bold", color = o.focused and "primary" or "on_surface_variant" }),
-      ui.column({ gap = 10 }, rows),
-    }))
-  end
 
   local dock = {}
   for _, p in ipairs(pinned) do
@@ -323,12 +306,71 @@ local function render()
     end
   end
 
+  local blockW = math.floor((PANEL_W - 2 * PAD - OUTPUT_GAP * math.max(0, #model - 1)) / math.max(1, #model))
+  local availW = blockW - WS_LABEL_W - TILE_GAP
+  local availH = PANEL_H - 2 * PAD - HEADER_H - OUTPUT_LABEL_H - (#dock > 0 and DOCK_H or 0) - 24
+
+  local blocks = {}
+  for _, entry in ipairs(model) do
+    local n = math.max(1, #entry.workspaces)
+    local rowH = math.floor((availH - ROW_GAP * (n - 1)) / n)
+    rowH = math.max(ROW_MIN_H, math.min(ROW_MAX_H, rowH))
+
+    local widest = 1
+    for _, row in ipairs(entry.workspaces) do
+      local width = 0
+      for _, column in ipairs(row.columns) do
+        width += (column[1].size and column[1].size[1] or 800)
+      end
+      widest = math.max(widest, width)
+    end
+    local scale = math.min(0.25, availW / widest)
+
+    local rows = {}
+    for _, row in ipairs(entry.workspaces) do
+      local widths, total = {}, TILE_GAP * math.max(0, #row.columns - 1)
+      for i, column in ipairs(row.columns) do
+        local size = column[1].size or { 800, 600 }
+        widths[i] = math.max(TILE_MIN_W, math.min(TILE_MAX_W, math.floor(size[1] * scale)))
+        total += widths[i]
+      end
+      if total > availW then
+        local gaps = TILE_GAP * math.max(0, #row.columns - 1)
+        local factor = (availW - gaps) / math.max(1, total - gaps)
+        for i in ipairs(widths) do
+          widths[i] = math.max(TILE_MIN_W, math.floor(widths[i] * factor))
+        end
+      end
+
+      local cols = {}
+      for i, column in ipairs(row.columns) do
+        local k = #column
+        local height = math.floor((rowH - TILE_GAP * (k - 1)) / k)
+        local stacked = {}
+        for _, w in ipairs(column) do
+          table.insert(stacked, tile(w, labels[w.id], widths[i], math.max(18, height)))
+        end
+        table.insert(cols, ui.column({ gap = TILE_GAP }, stacked))
+      end
+      local ws = row.ws
+      table.insert(rows, ui.row({ gap = TILE_GAP, align = "center", height = rowH }, {
+        ui.label({ text = ws.name or tostring(ws.idx or ""), width = WS_LABEL_W, fontSize = 11, fontWeight = ws.is_active and "bold" or "normal", color = ws.is_active and "primary" or "on_surface_variant", maxLines = 1 }),
+        ui.row({ gap = TILE_GAP }, cols),
+      }))
+    end
+    local o = entry.output
+    table.insert(blocks, ui.column({ width = blockW, gap = ROW_GAP }, {
+      ui.label({ text = o.name or "", fontSize = 12, fontWeight = "bold", color = o.focused and "primary" or "on_surface_variant" }),
+      ui.column({ gap = ROW_GAP }, rows),
+    }))
+  end
+
   local status = nil
   if snapshot == nil then
     status = ui.label({ text = "Waiting for niri…", color = "on_surface_variant" })
   end
 
-  panel.render(ui.column({ gap = 14, padding = 4 }, {
+  panel.render(ui.column({ gap = 12, padding = 4 }, {
     ui.row({ align = "center", justify = "space_between" }, {
       ui.row({ gap = 8, align = "center" }, {
         ui.glyph({ name = "layout-grid", size = 18, color = "primary" }),

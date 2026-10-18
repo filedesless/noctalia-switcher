@@ -39,8 +39,8 @@ default = "asdfghjklqwertyuiopzxcvbnm"
 [[panel]]
 id = "panel"
 entry = "panel.luau"
-width = 1240
-height = 720
+width = 1400
+height = 880
 placement = "floating"
 position = "center"
 keyboard_focus = "exclusive"

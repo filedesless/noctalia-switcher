@@ -16,6 +16,10 @@ done
 
 local workspaces = {}
 local windows = {}
+-- app_id -> icon path (false when there is none). Resolved here, a few at
+-- a time as apps appear, because resolving them all in the panel's onOpen
+-- can exceed its CPU budget.
+local icons = {}
 
 local function findById(values, id)
   for index, value in ipairs(values) do
@@ -70,8 +74,43 @@ local function outputs()
   return result
 end
 
+local ICONS_PER_CALL = 2
+local IDLE_MS, BUSY_MS = 60000, 50
+
 local function publish()
-  noctalia.state.set(STATE_KEY, { outputs = outputs(), workspaces = workspaces, windows = windows })
+  noctalia.state.set(STATE_KEY, { outputs = outputs(), workspaces = workspaces, windows = windows, icons = icons })
+end
+
+-- Resolves up to ICONS_PER_CALL missing icons; true if some are still
+-- missing. A cold lookup is slow enough that a dozen at once overruns the
+-- callback's CPU budget, so the rest are left to update() ticks.
+local function resolveIcons()
+  local done = 0
+  for _, w in ipairs(windows) do
+    if w.app_id ~= "" and icons[w.app_id] == nil then
+      if done == ICONS_PER_CALL then
+        return true
+      end
+      icons[w.app_id] = noctalia.appIconPath(w.app_id, 32) or false
+      done += 1
+    end
+  end
+  return false
+end
+
+local function refresh()
+  local pending = resolveIcons()
+  publish()
+  noctalia.setUpdateInterval(pending and BUSY_MS or IDLE_MS)
+end
+
+function update()
+  for _, w in ipairs(windows) do
+    if w.app_id ~= "" and icons[w.app_id] == nil then
+      refresh()
+      return
+    end
+  end
 end
 
 local function applyEvent(e)
@@ -151,7 +190,7 @@ if noctalia.commandExists("niri") then
   noctalia.runStream(STREAM, function(line)
     local event = noctalia.json.decode(line)
     if type(event) == "table" and applyEvent(event) then
-      publish()
+      refresh()
     end
   end)
 else
