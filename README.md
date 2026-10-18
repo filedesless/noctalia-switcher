@@ -31,7 +31,8 @@ ln -s ~/src/noctalia-switcher ~/.local/share/noctalia/plugins/switcher
 ```
 
 Add `"filedesless/switcher"` to `[plugins] enabled`, then restart Noctalia
-(plugins are installed at startup). Bind a key in niri:
+(plugins are installed at startup). Bind a key in niri; here right Cmd
+(Super_R) is made the level-3 key with the xkb option `lv3:rwin_switch`:
 
 ```kdl
 binds {
