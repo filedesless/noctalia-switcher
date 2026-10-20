@@ -6,9 +6,8 @@
 --
 -- Labels: a pinned app's key goes to its last used window, and a pinned app
 -- with no window shows in the dock, where its key launches it. Every other
--- window gets a lasting label from the leftover letters, after its app's
--- name where it can (see assignLabels). Space goes back to the previous
--- window.
+-- window gets its app name's first letter, or two letters when several
+-- windows share it (see assignLabels).
 
 local SNAPSHOT = "switcher.snapshot"
 local OPEN_KEY = "switcher.open"
@@ -177,40 +176,29 @@ local function byRecency(a, b)
   return (a.focus or 0) > (b.focus or 0)
 end
 
--- The two most recently used windows: the current one (niri reports none
--- focused while the panel holds the keyboard) and the one Space goes back
--- to (as the service's toggle does).
-local function recent()
-  local first, second = nil, nil
-  for _, w in ipairs((snapshot or {}).windows or {}) do
-    if first == nil or (w.focus or 0) > (first.focus or 0) then
-      first, second = w, first
-    elseif second == nil or (w.focus or 0) > (second.focus or 0) then
-      second = w
+-- The current window: the most recently used one. Not is_focused: niri
+-- reports no window focused while the panel holds the keyboard.
+local function isCurrent(w)
+  local first = nil
+  for _, v in ipairs((snapshot or {}).windows or {}) do
+    if first == nil or (v.focus or 0) > (first.focus or 0) then
+      first = v
     end
   end
-  return first, second
-end
-
-local function previousWindow()
-  local _, second = recent()
-  return second
-end
-
-local function isCurrent(w)
-  local first = recent()
   return first ~= nil and first.id == w.id
 end
 
 -- Labels for every window and the dock's launchers.
 --
 -- A pinned app's key goes to its most recently used window, or to the one
--- before when that one is focused (pressing it again cycles). Every other
--- window gets a label from the leftover letters, preferring its app name's
--- letters, and keeps it while it lives (remembered in LABELS_KEY) unless
--- the labels must change length. When windows outnumber the letters, the
--- last few letters become prefixes of two-letter labels, as few as needed,
--- so most windows keep one letter.
+-- before when that one is current (pressing it again cycles). Every other
+-- window is filed under its app name's first letter that is free (not a
+-- pinned key, in hint_chars). A letter with one window is that window's
+-- label; when several windows share it (steam and spotify, or two
+-- terminals), each gets that letter plus a second: its name's next letter
+-- if no one else there has it (st, sp), else a free one from hint_chars.
+-- Second letters are remembered per window (LABELS_KEY) so they don't
+-- reshuffle between openings.
 local function assignLabels(model)
   targets = {}
   local labels = {}
@@ -256,81 +244,102 @@ local function assignLabels(model)
   end
 
   local alphabet = hintAlphabet()
-  local n = #alphabet
-  if n == 0 then
-    return labels
-  end
-  -- k prefixes leave n - k single letters and make k * n pairs.
-  local k = 0
-  while k < n and (n - k) + k * n < #others do
-    k += 1
-  end
-  local single, prefix = {}, {}
-  for i, c in ipairs(alphabet) do
-    if i <= n - k then
-      single[c] = true
-    else
-      prefix[c] = true
-    end
-  end
   local inPool = {}
   for _, c in ipairs(alphabet) do
     inPool[c] = true
-  end
-  local function valid(label)
-    if type(label) ~= "string" or targets[label] then
-      return false
-    end
-    if #label == 1 then
-      return single[label] == true
-    end
-    return #label == 2 and prefix[label:sub(1, 1)] == true and inPool[label:sub(2, 2)] == true
   end
   local function give(w, label)
     labels[w.id] = label
     targets[label] = { kind = "window", id = w.id }
   end
 
+  -- File each window under a first letter: its name's first free one, or
+  -- for a name with none, a pool letter no name claimed.
   table.sort(others, byRecency)
-  local remembered = noctalia.state.get(LABELS_KEY) or {}
-  local fresh = {}
+  local groups, order, homeless, names = {}, {}, {}, {}
   for _, w in ipairs(others) do
-    local old = remembered["w" .. tostring(w.id)]
-    if valid(old) then
-      give(w, old)
-    else
-      table.insert(fresh, w)
-    end
-  end
-  for _, w in ipairs(fresh) do
-    local wanted = mnemonic(w.app_id)
-    for _, c in ipairs(alphabet) do
-      table.insert(wanted, c)
-    end
-    local label = nil
-    for _, c in ipairs(wanted) do
-      if valid(c) then
-        label = c
+    local name = mnemonic(w.app_id)
+    names[w.id] = name
+    local home = nil
+    for i, c in ipairs(name) do
+      if inPool[c] then
+        home = c
+        names[w.id] = { table.unpack(name, i + 1) }
         break
       end
     end
-    if label == nil then
-      for _, first in ipairs(alphabet) do
-        if prefix[first] then
-          for _, c in ipairs(wanted) do
-            if valid(first .. c) then
-              label = first .. c
-              break
-            end
-          end
-        end
-        if label then
-          break
-        end
+    if home then
+      if groups[home] == nil then
+        groups[home] = {}
+        table.insert(order, home)
+      end
+      table.insert(groups[home], w)
+    else
+      table.insert(homeless, w)
+    end
+  end
+  for _, w in ipairs(homeless) do
+    local home = nil
+    for _, c in ipairs(alphabet) do
+      if groups[c] == nil then
+        home = c
+        break
       end
     end
-    if label then
-      give(w, label)
+    home = home or alphabet[1]
+    if home then
+      if groups[home] == nil then
+        groups[home] = {}
+        table.insert(order, home)
+      end
+      table.insert(groups[home], w)
+    end
+  end
+
+  local remembered = noctalia.state.get(LABELS_KEY) or {}
+  for _, home in ipairs(order) do
+    local list = groups[home]
+    if #list == 1 then
+      give(list[1], home)
+    else
+      local used = {}
+      local fresh = {}
+      -- Remembered second letters first (still under this letter).
+      for _, w in ipairs(list) do
+        local old = remembered["w" .. tostring(w.id)]
+        if type(old) == "string" and #old == 2 and old:sub(1, 1) == home and not used[old] then
+          used[old] = true
+          give(w, old)
+        else
+          table.insert(fresh, w)
+        end
+      end
+      -- A name's next letter splits apps only if no other app here has it.
+      local count = {}
+      for _, w in ipairs(fresh) do
+        local c = names[w.id][1]
+        if c then
+          count[c] = (count[c] or 0) + 1
+        end
+      end
+      for _, w in ipairs(fresh) do
+        local wanted = {}
+        local c = names[w.id][1]
+        if c and count[c] == 1 then
+          table.insert(wanted, c)
+        end
+        for _, h in ipairs(alphabet) do
+          table.insert(wanted, h)
+        end
+        for _, second in ipairs(wanted) do
+          local label = home .. second
+          if not used[label] then
+            used[label] = true
+            give(w, label)
+            break
+          end
+        end
+      end
     end
   end
 
@@ -576,9 +585,6 @@ local function render()
     }))
   end
 
-  local back = previousWindow()
-  local backTo = back and (back.app_id ~= "" and back.app_id or back.title) or "nothing"
-
   local status = nil
   if snapshot == nil then
     status = ui.label({ text = "Waiting for niri…", color = "on_surface_variant" })
@@ -591,7 +597,7 @@ local function render()
         ui.label({ text = "Switch window", fontSize = 15, fontWeight = "bold" }),
         ui.label({ text = typed, fontSize = 15, fontWeight = "bold", color = "primary", visible = typed ~= "" }),
       }),
-      ui.label({ text = "Type a label · Space: back to " .. backTo .. " · Backspace to undo · Esc to close", fontSize = 11, color = "on_surface_variant", maxLines = 1 }),
+      ui.label({ text = "Type a label · Backspace to undo · Esc to close", fontSize = 11, color = "on_surface_variant" }),
     }),
     status or ui.row({ gap = OUTPUT_GAP, align = "start" }, blocks),
     ui.row({ gap = 8, visible = #dock > 0 }, dock),
@@ -624,12 +630,6 @@ function onKey(chord, pressed)
   chord = string.lower(chord)
   if chord == "escape" then
     panel.close()
-    return
-  elseif chord == "space" then
-    local w = previousWindow()
-    if w then
-      act({ kind = "window", id = w.id })
-    end
     return
   elseif chord == "backspace" then
     typed = typed:sub(1, -2)

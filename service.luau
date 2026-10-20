@@ -15,7 +15,6 @@
 
 local STATE_KEY = "switcher.snapshot"
 local OPEN_KEY = "switcher.open"
-local PANEL_ID = "filedesless/switcher:panel"
 local STREAM = [[
 delay=1
 while :; do
@@ -481,35 +480,4 @@ end)
 function onOutputsChanged()
   publish()
   loadOutputs()
-end
-
--- The previously focused window: the second most recently used. Not "the
--- latest that isn't focused": while the panel holds the keyboard, niri
--- reports no window focused.
-local function previousWindow()
-  local first, second = nil, nil
-  for _, w in ipairs(windows) do
-    if first == nil or w.focus > first.focus then
-      first, second = w, first
-    elseif second == nil or w.focus > second.focus then
-      second = w
-    end
-  end
-  return second
-end
-
--- noctalia msg plugin filedesless/switcher:service all toggle
--- Opens the panel; pressed again while it's open, goes back to the previous
--- window (a quick alt-tab) and closes it.
-function onIpc(event)
-  if event ~= "toggle" then
-    return
-  end
-  if panelOpen then
-    local w = previousWindow()
-    if w then
-      noctalia.runAsync({ "niri", "msg", "action", "focus-window", "--id", tostring(w.id) })
-    end
-  end
-  noctalia.togglePanel(PANEL_ID)
 end

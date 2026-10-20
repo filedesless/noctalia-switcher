@@ -7,21 +7,20 @@ order, with a column's stacked windows one above the other. Each tile shows
 the app icon, the window title and a label of one or two letters. Typing a
 label focuses that window and closes the panel.
 
-- **Space**, or the hotkey again, goes back to the previous window (a
-  quick alt-tab). **Backspace** undoes a letter, **Esc** closes, and a
-  letter that matches no label starts over. Clicking a tile works too.
+- **Backspace** undoes a letter, **Esc** closes, and a letter that
+  matches no label starts over. Clicking a tile works too.
 - **Pinned apps** keep a fixed letter: `z` for Zen, say. It focuses the
   app's most recently used window, or the one before when that one is
-  focused, so pressing it again cycles. The app's other windows get labels
+  current, so pressing it again cycles. The app's other windows get labels
   like any other. A pinned app that isn't running shows in a dock row under
   the map, and its letter launches it (through `niri msg action spawn`, so
   it's niri's child, not Noctalia's).
-- **Every other window** gets a label from the leftover letters
-  (`hint_chars`), after its app's name when it can (Alacritty `a`, Zed
-  `e` once `z` is pinned), and keeps it for as long as it lives. When
-  windows outnumber the letters, the last few letters become prefixes of
-  two-letter labels, as few as needed, so most windows keep one letter.
-  Labels change only when that number of prefixes does.
+- **Every other window** is labelled by its app name's first letter that
+  isn't pinned (Zed is `e` once `z` is pinned). When several windows share
+  that letter, each gets two: the letter plus its name's next one if that
+  tells them apart (`st` steam, `sp` Spotify), else a free letter from
+  `hint_chars` (two Alacritty windows: `aa`, `as`). Second letters stay
+  with their window between openings.
 
 ## Previews
 
@@ -59,14 +58,12 @@ ln -s ~/src/noctalia-switcher ~/.local/share/noctalia/plugins/switcher
 ```
 
 Add `"filedesless/switcher"` to `[plugins] enabled`, then restart Noctalia
-(plugins are installed at startup). Bind a key in niri to the service's
-`toggle`, which opens the panel and, pressed again, goes back to the
-previous window (`panel-toggle` works too, without that). Here right Cmd
+(plugins are installed at startup). Bind a key in niri; here right Cmd
 (Super_R) is made the level-3 key with the xkb option `lv3:rwin_switch`:
 
 ```kdl
 binds {
-    ISO_Level3_Shift+Space { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "toggle"; }
+    ISO_Level3_Shift+Space { spawn "noctalia" "msg" "panel-toggle" "filedesless/switcher:panel"; }
 }
 ```
 
@@ -83,8 +80,7 @@ pinned = [
     "t thunderbird",
     "o md.obsidian.Obsidian obsidian",
 ]
-# Letters for the other windows' labels, best first; the last ones become
-# two-letter prefixes when there are many windows.
+# Letters for labels when names don't give one, best first.
 hint_chars = "asdfghjklqwertyuiopzxcvbnm"
 previews = true
 gaps = 16 # niri's layout gaps
