@@ -2,9 +2,9 @@
 #
 # The panel draws a minimap of every monitor's workspaces with their
 # windows as tiles, each labelled with one or two letters (helix goto_word
-# style). Typing a label focuses that window. Pinned apps keep a fixed
-# first letter, and a pinned app that isn't running sits in a dock row,
-# where its letter launches it.
+# style). Typing a label focuses that window; Space goes back to the
+# previous one. Pinned apps keep a fixed letter, and a pinned app that
+# isn't running sits in a dock row, where its letter launches it.
 
 id = "filedesless/switcher"
 name = "Switcher"
@@ -27,7 +27,8 @@ description_key = "settings.pinned.description"
 default = []
 
 # Letters for the other windows' labels, best first. Pinned keys are
-# taken out of it.
+# taken out of it; the last letters become two-letter prefixes when there
+# are more windows than letters.
 [[setting]]
 key = "hint_chars"
 type = "string"
@@ -55,7 +56,8 @@ default = 16
 min = 0
 max = 64
 
-# Open with: noctalia msg panel-toggle filedesless/switcher:panel
+# Open with: noctalia msg plugin filedesless/switcher:service all toggle
+# (or panel-toggle filedesless/switcher:panel)
 [[panel]]
 id = "panel"
 entry = "panel.luau"
@@ -67,11 +69,12 @@ keyboard_focus = "exclusive"
 capture_keys = [
   "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
   "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
-  "backspace", "escape",
+  "space", "backspace", "escape",
 ]
 
 # Keeps a live copy of niri's windows and workspaces (from its event
 # stream) in "switcher.snapshot", so the panel opens without waiting on IPC.
+# Its "toggle" IPC opens the panel, or goes back to the previous window.
 [[service]]
 id = "service"
 entry = "service.luau"

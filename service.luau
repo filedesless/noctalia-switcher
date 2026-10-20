@@ -15,6 +15,7 @@
 
 local STATE_KEY = "switcher.snapshot"
 local OPEN_KEY = "switcher.open"
+local PANEL_ID = "filedesless/switcher:panel"
 local STREAM = [[
 delay=1
 while :; do
@@ -74,6 +75,14 @@ local function findById(values, id)
   return nil, nil
 end
 
+-- niri's focus_timestamp as a number (seconds), for most-recently-used order.
+local function stamp(t)
+  if type(t) ~= "table" then
+    return nil
+  end
+  return (tonumber(t.secs) or 0) + (tonumber(t.nanos) or 0) / 1e9
+end
+
 local function normalizeWindow(w, previous)
   if type(w) ~= "table" or w.id == nil then
     return nil
@@ -88,6 +97,7 @@ local function normalizeWindow(w, previous)
     workspace_id = w.workspace_id or previous.workspace_id,
     is_focused = w.is_focused == true,
     is_floating = w.is_floating == true,
+    focus = stamp(w.focus_timestamp) or previous.focus or 0,
     pos = layout.pos_in_scrolling_layout,
     size = layout.tile_size or previous.size,
     wsize = layout.window_size or previous.wsize,
@@ -422,6 +432,12 @@ local function applyEvent(e)
     for _, w in ipairs(windows) do
       w.is_focused = w.id == e.WindowFocusChanged.id
     end
+  elseif e.WindowFocusTimestampChanged then
+    local _, w = findById(windows, e.WindowFocusTimestampChanged.id)
+    if w == nil then
+      return false
+    end
+    w.focus = stamp(e.WindowFocusTimestampChanged.focus_timestamp) or w.focus
   elseif e.WindowLayoutsChanged then
     for _, change in ipairs(e.WindowLayoutsChanged.changes or {}) do
       local _, w = findById(windows, change[1])
@@ -465,4 +481,35 @@ end)
 function onOutputsChanged()
   publish()
   loadOutputs()
+end
+
+-- The previously focused window: the second most recently used. Not "the
+-- latest that isn't focused": while the panel holds the keyboard, niri
+-- reports no window focused.
+local function previousWindow()
+  local first, second = nil, nil
+  for _, w in ipairs(windows) do
+    if first == nil or w.focus > first.focus then
+      first, second = w, first
+    elseif second == nil or w.focus > second.focus then
+      second = w
+    end
+  end
+  return second
+end
+
+-- noctalia msg plugin filedesless/switcher:service all toggle
+-- Opens the panel; pressed again while it's open, goes back to the previous
+-- window (a quick alt-tab) and closes it.
+function onIpc(event)
+  if event ~= "toggle" then
+    return
+  end
+  if panelOpen then
+    local w = previousWindow()
+    if w then
+      noctalia.runAsync({ "niri", "msg", "action", "focus-window", "--id", tostring(w.id) })
+    end
+  end
+  noctalia.togglePanel(PANEL_ID)
 end
