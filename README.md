@@ -9,18 +9,11 @@ label focuses that window and closes the panel.
 
 - **Backspace** undoes a letter, **Esc** closes, and a letter that
   matches no label starts over. Clicking a tile works too.
-- **Pinned apps** keep a fixed letter: `z` for Zen, say. It focuses the
-  app's most recently used window, or the one before when that one is
-  current, so pressing it again cycles. The app's other windows get labels
-  like any other. A pinned app that isn't running shows in a dock row under
-  the map, and its letter launches it (through `niri msg action spawn`, so
-  it's niri's child, not Noctalia's).
-- **Every other window** is labelled by its app name's first letter that
-  isn't pinned (Zed is `e` once `z` is pinned). When several windows share
-  that letter, each gets two: the letter plus its name's next one if that
-  tells them apart (`st` steam, `sp` Spotify), else a free letter from
-  `hint_chars` (two Alacritty windows: `aa`, `as`). Second letters stay
-  with their window between openings.
+- **Labels come from app names.** Each window is labelled by its app
+  name's first letter. When several windows share that letter, each gets
+  two: the letter plus the next letter of its name not taken yet (`st`
+  steam and `sp` Spotify, `ze` Zen and `zd` Zed), else a free letter from
+  `hint_chars`. Second letters stay with their window between openings.
 
 ## Previews
 
@@ -74,16 +67,8 @@ end in a non-modifier key.
 
 ```toml
 [plugin_settings."filedesless/switcher"]
-# "key app_id [command...]"; the command defaults to the app_id.
-pinned = [
-    "z zen-beta",
-    "t thunderbird",
-    "o md.obsidian.Obsidian obsidian",
-]
-# Letters for labels when names don't give one, best first.
+# Letters labels may use, best first.
 hint_chars = "asdfghjklqwertyuiopzxcvbnm"
 previews = true
 gaps = 16 # niri's layout gaps
 ```
-
-Find an app's `app_id` with `niri msg windows`.

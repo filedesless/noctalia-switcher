@@ -4,10 +4,8 @@
 -- windows one above the other), each window labelled. Typing a label
 -- focuses that window; Backspace undoes a letter, Esc closes.
 --
--- Labels: a pinned app's key goes to its last used window, and a pinned app
--- with no window shows in the dock, where its key launches it. Every other
--- window gets its app name's first letter, or two letters when several
--- windows share it (see assignLabels).
+-- Labels: each window gets its app name's first letter, or two letters
+-- when several windows share it (see assignLabels).
 
 local SNAPSHOT = "switcher.snapshot"
 local OPEN_KEY = "switcher.open"
@@ -15,7 +13,7 @@ local LABELS_KEY = "switcher.labels"
 -- Must match [[panel]] width/height in plugin.toml.
 local PANEL_W, PANEL_H = 1400, 880
 local PAD = 16
-local HEADER_H, DOCK_H, OUTPUT_LABEL_H = 34, 44, 22
+local HEADER_H, OUTPUT_LABEL_H = 34, 22
 local OUTPUT_GAP = 16
 local ROW_GAP = 8
 local TILE_GAP = 6
@@ -28,43 +26,10 @@ local COMPACT_MIN_W, COMPACT_MAX_W = 34, 200
 
 local snapshot = nil
 local typed = ""
-local targets = {} -- label -> { kind = "window", id = n } | { kind = "launch", argv = {...} }
-local pinned = {} -- ordered { key, app_id, argv, name }
-local iconCache = {}
-
-local function split(text)
-  local words = {}
-  for word in tostring(text or ""):gmatch("%S+") do
-    table.insert(words, word)
-  end
-  return words
-end
-
-local function loadPinned()
-  pinned = {}
-  local seen = {}
-  for _, line in ipairs(noctalia.getConfig("pinned") or {}) do
-    local words = split(line)
-    local key, app = words[1], words[2]
-    if key and app and #key == 1 and key:match("%l") and not seen[key] then
-      seen[key] = true
-      local argv = {}
-      for i = 3, #words do
-        table.insert(argv, words[i])
-      end
-      if #argv == 0 then
-        argv = { app }
-      end
-      table.insert(pinned, { key = key, app_id = app, argv = argv })
-    end
-  end
-end
+local targets = {} -- label -> window id
 
 local function hintAlphabet()
   local taken = {}
-  for _, p in ipairs(pinned) do
-    taken[p.key] = true
-  end
   local letters = {}
   local chars = tostring(noctalia.getConfig("hint_chars") or "asdfghjklqwertyuiopzxcvbnm")
   for c in chars:gmatch("%l") do
@@ -76,17 +41,10 @@ local function hintAlphabet()
   return letters
 end
 
--- Icons come resolved from the service; pinned apps that aren't running
--- are looked up here (a handful, cached).
+-- Icons come resolved from the service.
 local function icon(appId)
   local known = snapshot and snapshot.icons and snapshot.icons[appId]
-  if known ~= nil then
-    return known or nil
-  end
-  if iconCache[appId] == nil then
-    iconCache[appId] = noctalia.appIconPath(appId, 32) or false
-  end
-  return iconCache[appId] or nil
+  return known or nil
 end
 
 -- Workspaces worth showing, per output: those with windows, plus the active
@@ -176,8 +134,9 @@ local function byRecency(a, b)
   return (a.focus or 0) > (b.focus or 0)
 end
 
--- The current window: the most recently used one. Not is_focused: niri
--- reports no window focused while the panel holds the keyboard.
+-- The current window, to highlight: the most recently used one. Not
+-- is_focused: niri reports no window focused while the panel holds the
+-- keyboard.
 local function isCurrent(w)
   local first = nil
   for _, v in ipairs((snapshot or {}).windows or {}) do
@@ -188,55 +147,21 @@ local function isCurrent(w)
   return first ~= nil and first.id == w.id
 end
 
--- Labels for every window and the dock's launchers.
---
--- A pinned app's key goes to its most recently used window, or to the one
--- before when that one is current (pressing it again cycles). Every other
--- window is filed under its app name's first letter that is free (not a
--- pinned key, in hint_chars). A letter with one window is that window's
--- label; when several windows share it (steam and spotify, or two
--- terminals), each gets that letter plus a second: its name's next letter
--- if no one else there has it (st, sp), else a free one from hint_chars.
--- Second letters are remembered per window (LABELS_KEY) so they don't
--- reshuffle between openings.
+-- Labels for every window. Each is filed under its app name's first
+-- letter in hint_chars. A letter with one window is that window's label;
+-- when several windows share it (steam and spotify, or two terminals),
+-- each gets that letter plus a second: the next letter of its name not
+-- taken there yet (st steam, sp spotify; ze zen, zd zed), else a free one
+-- from hint_chars. Second letters are remembered per window (LABELS_KEY)
+-- so they don't reshuffle between openings.
 local function assignLabels(model)
   targets = {}
   local labels = {}
-  local pinnedByApp = {}
-  for _, p in ipairs(pinned) do
-    pinnedByApp[p.app_id] = p
-  end
-  local others, pinnedWindows = {}, {}
+  local others = {}
   for _, entry in ipairs(model) do
     for _, row in ipairs(entry.workspaces) do
       for _, column in ipairs(row.columns) do
         for _, w in ipairs(column) do
-          local p = pinnedByApp[w.app_id]
-          if p then
-            pinnedWindows[p.key] = pinnedWindows[p.key] or {}
-            table.insert(pinnedWindows[p.key], w)
-          else
-            table.insert(others, w)
-          end
-        end
-      end
-    end
-  end
-
-  for _, p in ipairs(pinned) do
-    local list = pinnedWindows[p.key]
-    if list == nil then
-      targets[p.key] = { kind = "launch", argv = p.argv }
-    else
-      table.sort(list, byRecency)
-      local chosen = list[1]
-      if isCurrent(chosen) and list[2] then
-        chosen = list[2]
-      end
-      labels[chosen.id] = p.key
-      targets[p.key] = { kind = "window", id = chosen.id }
-      for _, w in ipairs(list) do
-        if w ~= chosen then
           table.insert(others, w)
         end
       end
@@ -250,11 +175,11 @@ local function assignLabels(model)
   end
   local function give(w, label)
     labels[w.id] = label
-    targets[label] = { kind = "window", id = w.id }
+    targets[label] = w.id
   end
 
-  -- File each window under a first letter: its name's first free one, or
-  -- for a name with none, a pool letter no name claimed.
+  -- File each window under a first letter: its name's first in the pool,
+  -- or for a name with none, a pool letter no name claimed.
   table.sort(others, byRecency)
   local groups, order, homeless, names = {}, {}, {}, {}
   for _, w in ipairs(others) do
@@ -314,20 +239,10 @@ local function assignLabels(model)
           table.insert(fresh, w)
         end
       end
-      -- A name's next letter splits apps only if no other app here has it.
-      local count = {}
+      -- The rest of its name first (most recent windows choose first), then
+      -- the pool.
       for _, w in ipairs(fresh) do
-        local c = names[w.id][1]
-        if c then
-          count[c] = (count[c] or 0) + 1
-        end
-      end
-      for _, w in ipairs(fresh) do
-        local wanted = {}
-        local c = names[w.id][1]
-        if c and count[c] == 1 then
-          table.insert(wanted, c)
-        end
+        local wanted = table.clone(names[w.id])
         for _, h in ipairs(alphabet) do
           table.insert(wanted, h)
         end
@@ -366,22 +281,12 @@ local function badge(label, big)
   })
 end
 
-local function act(target)
-  if target == nil then
+local function focus(id)
+  if id == nil then
     return
   end
   panel.close()
-  if target.kind == "window" then
-    noctalia.runAsync({ "niri", "msg", "action", "focus-window", "--id", tostring(target.id) })
-  else
-    -- Through niri, so the app is niri's child (its env, its cgroup), not
-    -- noctalia's.
-    local argv = { "niri", "msg", "action", "spawn", "--" }
-    for _, a in ipairs(target.argv) do
-      table.insert(argv, a)
-    end
-    noctalia.runAsync(argv)
-  end
+  noctalia.runAsync({ "niri", "msg", "action", "focus-window", "--id", tostring(id) })
 end
 
 local function aspectOf(w)
@@ -454,7 +359,7 @@ local function tile(w, label, height)
     borderWidth = current and 2 or 1,
     opacity = dim and 0.3 or 1,
     onClick = function()
-      act({ kind = "window", id = w.id })
+      focus(w.id)
     end,
   }, content)
 end
@@ -483,34 +388,9 @@ local function render()
   local model = layoutModel()
   local labels = assignLabels(model)
 
-  local dock = {}
-  for _, p in ipairs(pinned) do
-    local t = targets[p.key]
-    if t and t.kind == "launch" then
-      table.insert(dock, ui.row({
-        key = "dock-" .. p.key,
-        gap = 6,
-        align = "center",
-        padding = 6,
-        radius = 8,
-        fill = "surface_variant/0.4",
-        border = "outline/0.3",
-        borderWidth = 1,
-        opacity = (typed ~= "" and not matches(p.key)) and 0.3 or 0.8,
-        onClick = function()
-          act(t)
-        end,
-      }, {
-        ui.image({ path = icon(p.app_id), width = 18, height = 18, fit = "contain", visible = icon(p.app_id) ~= nil }),
-        ui.label({ text = p.argv[1], fontSize = 11, color = "on_surface_variant" }),
-        badge(p.key, false),
-      }))
-    end
-  end
-
   local blockW = math.floor((PANEL_W - 2 * PAD - OUTPUT_GAP * math.max(0, #model - 1)) / math.max(1, #model))
   local availW = blockW - WS_LABEL_W - TILE_GAP
-  local availH = PANEL_H - 2 * PAD - HEADER_H - OUTPUT_LABEL_H - (#dock > 0 and DOCK_H or 0) - 24
+  local availH = PANEL_H - 2 * PAD - HEADER_H - OUTPUT_LABEL_H - 24
 
   local blocks = {}
   for _, entry in ipairs(model) do
@@ -600,7 +480,6 @@ local function render()
       ui.label({ text = "Type a label · Backspace to undo · Esc to close", fontSize = 11, color = "on_surface_variant" }),
     }),
     status or ui.row({ gap = OUTPUT_GAP, align = "start" }, blocks),
-    ui.row({ gap = 8, visible = #dock > 0 }, dock),
   }))
 end
 
@@ -613,7 +492,6 @@ end)
 
 function onOpen()
   noctalia.state.set(OPEN_KEY, true)
-  loadPinned()
   snapshot = noctalia.state.get(SNAPSHOT)
   typed = ""
   render()
@@ -641,7 +519,7 @@ function onKey(chord, pressed)
 
   typed ..= chord
   if targets[typed] then
-    act(targets[typed])
+    focus(targets[typed])
     return
   end
   for label in pairs(targets) do

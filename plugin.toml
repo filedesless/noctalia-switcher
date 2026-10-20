@@ -2,9 +2,8 @@
 #
 # The panel draws a minimap of every monitor's workspaces with their
 # windows as tiles, each labelled with one or two letters (helix goto_word
-# style). Typing a label focuses that window. Pinned apps keep a fixed
-# letter, and a pinned app that isn't running sits in a dock row, where its
-# letter launches it.
+# style): its app name's first letter, or two letters when windows share
+# it. Typing a label focuses that window.
 
 id = "filedesless/switcher"
 name = "Switcher"
@@ -13,21 +12,12 @@ plugin_api = 26
 author = "filedesless"
 license = "MIT"
 icon = "layout-grid"
-description = "Jump to any niri window from a minimap of all workspaces by typing its label; pinned apps get fixed letters and launch when not running."
-tags = ["launcher", "panel", "service", "niri", "productivity"]
+description = "Jump to any niri window from a minimap of all workspaces by typing its label, taken from the app's name."
+tags = ["panel", "service", "niri", "productivity"]
 dependencies = ["niri", "grim"]
 
-# "key app_id [command...]", e.g. "z zen-beta" or "o md.obsidian.Obsidian
-# obsidian". The command defaults to the app_id.
-[[setting]]
-key = "pinned"
-type = "string_list"
-label_key = "settings.pinned.label"
-description_key = "settings.pinned.description"
-default = []
-
-# Letters for the other windows' labels, best first. Pinned keys are
-# taken out of it.
+# Letters labels may use, best first: second letters, and first letters
+# for names that have none of them.
 [[setting]]
 key = "hint_chars"
 type = "string"
