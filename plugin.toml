@@ -1,9 +1,12 @@
 # Switcher: jump to any window on niri by typing its label.
 #
-# The panel draws a minimap of every monitor's workspaces with their
-# windows as tiles, each labelled with one or two letters (helix goto_word
+# Every window is labelled with one or two letters (helix goto_word
 # style): its app name's first letter, or two letters when windows share
-# it. Typing a label focuses that window.
+# it. Typing a label focuses that window. Two panels show the labels: a
+# compact list of app names, and a minimap of every monitor's workspaces
+# with their windows as tiles; Space switches between them. Bound to
+# rcmd+letter in niri, the service focuses a window straight away when the
+# letter is a whole label, and opens the list when it starts several.
 
 id = "filedesless/switcher"
 name = "Switcher"
@@ -45,7 +48,7 @@ default = 16
 min = 0
 max = 64
 
-# Open with: noctalia msg panel-toggle filedesless/switcher:panel
+# The minimap. Sizes must match switcher.luau's PANEL_W/H.
 [[panel]]
 id = "panel"
 entry = "panel.luau"
@@ -57,11 +60,29 @@ keyboard_focus = "exclusive"
 capture_keys = [
   "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
   "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
-  "backspace", "escape",
+  "space", "backspace", "escape",
+]
+
+# The compact list: labels and app names. Sizes must match switcher.luau's
+# COMPACT_W/H.
+[[panel]]
+id = "compact"
+entry = "compact.luau"
+width = 560
+height = 520
+placement = "floating"
+position = "center"
+keyboard_focus = "exclusive"
+capture_keys = [
+  "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+  "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+  "space", "backspace", "escape",
 ]
 
 # Keeps a live copy of niri's windows and workspaces (from its event
-# stream) in "switcher.snapshot", so the panel opens without waiting on IPC.
+# stream) in "switcher.snapshot", so the panels open without waiting on IPC.
+# Bind its "key" event to rcmd+letter and rcmd+Space in niri:
+#   noctalia msg plugin filedesless/switcher:service all key <letter|space>
 [[service]]
 id = "service"
 entry = "service.luau"

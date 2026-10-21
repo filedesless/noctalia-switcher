@@ -13,8 +13,13 @@
 -- tiledRects), assuming no struts and work-area insets split evenly
 -- between top and bottom.
 
+local labelsLib = require("./labels.luau")
+
 local STATE_KEY = "switcher.snapshot"
-local OPEN_KEY = "switcher.open"
+local OPEN_KEY = "switcher.open" -- the open panel's mode, or false
+local PENDING_KEY = "switcher.pending"
+local KEY_KEY = "switcher.key"
+local PANEL_IDS = { full = "filedesless/switcher:panel", compact = "filedesless/switcher:compact" }
 local STREAM = [[
 delay=1
 while :; do
@@ -131,8 +136,12 @@ local function outputs()
   return result
 end
 
+local function snapshot()
+  return { outputs = outputs(), workspaces = workspaces, windows = windows, icons = icons, previews = previews }
+end
+
 local function publish()
-  noctalia.state.set(STATE_KEY, { outputs = outputs(), workspaces = workspaces, windows = windows, icons = icons, previews = previews })
+  noctalia.state.set(STATE_KEY, snapshot())
 end
 
 -- Resolves up to ICONS_PER_CALL missing icons; true if some are still
@@ -469,13 +478,64 @@ else
   noctalia.log("switcher: niri not found on PATH")
 end
 
--- The panel says when it's open: captures wait, so it isn't in them.
+-- The panels say when one is open: captures wait, so it isn't in them.
+local openingUntil = 0 -- while the list opens, letters queue up in PENDING_KEY
 noctalia.state.watch(OPEN_KEY, function(value)
-  panelOpen = value == true
-  if not panelOpen then
+  panelOpen = PANEL_IDS[value] ~= nil
+  if panelOpen then
+    openingUntil = 0
+  else
     scheduleCapture()
   end
 end)
+
+-- noctalia msg plugin filedesless/switcher:service all key <letter|space>
+-- What niri's rcmd binds send. With a panel open, Space switches to the
+-- other panel and a letter goes to the panel as if typed there (niri takes
+-- rcmd+letter before the panel sees it). With none open, Space opens the
+-- compact list; a letter that is a whole label focuses its window, and one
+-- that starts longer labels opens the list with it typed.
+local keyCount = 0
+function onIpc(event, payload)
+  if event ~= "key" or type(payload) ~= "string" then
+    return
+  end
+  local key = payload:lower()
+  local open = noctalia.state.get(OPEN_KEY)
+  if PANEL_IDS[open] then
+    if key == "space" then
+      noctalia.togglePanel(open == "full" and PANEL_IDS.compact or PANEL_IDS.full)
+    else
+      keyCount += 1
+      noctalia.state.set(KEY_KEY, { key = key, n = tostring(noctalia.nowMs()) .. ":" .. keyCount })
+    end
+    return
+  end
+  if key == "space" then
+    noctalia.state.set(PENDING_KEY, false)
+    noctalia.togglePanel(PANEL_IDS.compact)
+    return
+  elseif not key:match("^%l$") then
+    return
+  elseif noctalia.nowMs() < openingUntil then
+    local pending = noctalia.state.get(PENDING_KEY)
+    noctalia.state.set(PENDING_KEY, (type(pending) == "string" and pending or "") .. key)
+    return
+  end
+  local _, targets = labelsLib.assign(labelsLib.windowsShown(snapshot()))
+  if targets[key] then
+    noctalia.runAsync({ "niri", "msg", "action", "focus-window", "--id", tostring(targets[key]) })
+    return
+  end
+  for label in pairs(targets) do
+    if label:sub(1, 1) == key then
+      noctalia.state.set(PENDING_KEY, key)
+      openingUntil = noctalia.nowMs() + 1000
+      noctalia.togglePanel(PANEL_IDS.compact)
+      return
+    end
+  end
+end
 
 function onOutputsChanged()
   publish()
