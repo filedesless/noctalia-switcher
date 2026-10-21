@@ -1,0 +1,30 @@
+// rcmd binds for the switcher. Right Super is ISO_Level3_Shift (xkb option
+// lv3:rwin_switch). Paste inside binds { } in ~/.config/niri/config.kdl,
+// replacing the old ISO_Level3_Shift+Space bind.
+ISO_Level3_Shift+Space hotkey-overlay-title="Window switcher" { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "space"; }
+ISO_Level3_Shift+A hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "a"; }
+ISO_Level3_Shift+B hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "b"; }
+ISO_Level3_Shift+C hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "c"; }
+ISO_Level3_Shift+D hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "d"; }
+ISO_Level3_Shift+E hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "e"; }
+ISO_Level3_Shift+F hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "f"; }
+ISO_Level3_Shift+G hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "g"; }
+ISO_Level3_Shift+H hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "h"; }
+ISO_Level3_Shift+I hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "i"; }
+ISO_Level3_Shift+J hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "j"; }
+ISO_Level3_Shift+K hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "k"; }
+ISO_Level3_Shift+L hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "l"; }
+ISO_Level3_Shift+M hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "m"; }
+ISO_Level3_Shift+N hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "n"; }
+ISO_Level3_Shift+O hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "o"; }
+ISO_Level3_Shift+P hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "p"; }
+ISO_Level3_Shift+Q hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "q"; }
+ISO_Level3_Shift+R hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "r"; }
+ISO_Level3_Shift+S hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "s"; }
+ISO_Level3_Shift+T hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "t"; }
+ISO_Level3_Shift+U hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "u"; }
+ISO_Level3_Shift+V hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "v"; }
+ISO_Level3_Shift+W hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "w"; }
+ISO_Level3_Shift+X hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "x"; }
+ISO_Level3_Shift+Y hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "y"; }
+ISO_Level3_Shift+Z hotkey-overlay-title=null { spawn "noctalia" "msg" "plugin" "filedesless/switcher:service" "all" "key" "z"; }

@@ -63,5 +63,6 @@ expect "rcmd+x (no label) does nothing" ""
 close
 
 grep -a -E "ERR|error|switcher.*(fail|panic)" "$SWITCHER_TEST_ROOT/noctalia.log" | grep -v secret-store | sed 's/^/LOG /'
+$r stop
 echo "$fails failed"
 exit "$fails"
