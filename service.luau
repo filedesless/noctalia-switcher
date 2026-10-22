@@ -20,6 +20,10 @@ local OPEN_KEY = "switcher.open" -- the open panel's mode, or false
 local PENDING_KEY = "switcher.pending"
 local KEY_KEY = "switcher.key"
 local PANEL_IDS = { full = "filedesless/switcher:panel", compact = "filedesless/switcher:compact" }
+-- The last panel shown, which rcmd+Space and rcmd+letter open next. Kept in
+-- a file so it outlasts Noctalia restarts.
+local MODE_FILE = (noctalia.getenv("XDG_STATE_HOME") or ((noctalia.getenv("HOME") or "") .. "/.local/state"))
+  .. "/noctalia/switcher-mode"
 local STREAM = [[
 delay=1
 while :; do
@@ -479,11 +483,17 @@ else
 end
 
 -- The panels say when one is open: captures wait, so it isn't in them.
-local openingUntil = 0 -- while the list opens, letters queue up in PENDING_KEY
+local openingUntil = 0 -- while a panel opens, letters queue up in PENDING_KEY
+local lastMode = noctalia.readFile(MODE_FILE)
+lastMode = PANEL_IDS[lastMode and lastMode:match("%l+")] and lastMode:match("%l+") or "compact"
 noctalia.state.watch(OPEN_KEY, function(value)
   panelOpen = PANEL_IDS[value] ~= nil
   if panelOpen then
     openingUntil = 0
+    if value ~= lastMode then
+      lastMode = value
+      noctalia.writeFile(MODE_FILE, value .. "\n")
+    end
   else
     scheduleCapture()
   end
@@ -493,8 +503,8 @@ end)
 -- What niri's rcmd binds send. With a panel open, Space switches to the
 -- other panel and a letter goes to the panel as if typed there (niri takes
 -- rcmd+letter before the panel sees it). With none open, Space opens the
--- compact list; a letter that is a whole label focuses its window, and one
--- that starts longer labels opens the list with it typed.
+-- panel shown last (lastMode); a letter that is a whole label focuses its
+-- window, and one that starts longer labels opens that panel with it typed.
 local keyCount = 0
 function onIpc(event, payload)
   if event ~= "key" or type(payload) ~= "string" then
@@ -513,7 +523,7 @@ function onIpc(event, payload)
   end
   if key == "space" then
     noctalia.state.set(PENDING_KEY, false)
-    noctalia.togglePanel(PANEL_IDS.compact)
+    noctalia.togglePanel(PANEL_IDS[lastMode])
     return
   elseif not key:match("^%l$") then
     return
@@ -531,7 +541,7 @@ function onIpc(event, payload)
     if label:sub(1, 1) == key then
       noctalia.state.set(PENDING_KEY, key)
       openingUntil = noctalia.nowMs() + 1000
-      noctalia.togglePanel(PANEL_IDS.compact)
+      noctalia.togglePanel(PANEL_IDS[lastMode])
       return
     end
   end
