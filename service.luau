@@ -20,7 +20,7 @@ local OPEN_KEY = "switcher.open" -- the open panel's mode, or false
 local PENDING_KEY = "switcher.pending"
 local KEY_KEY = "switcher.key"
 local PANEL_IDS = { full = "filedesless/switcher:panel", compact = "filedesless/switcher:compact" }
--- The last panel shown, which rcmd+Space and rcmd+letter open next. Kept in
+-- The last panel shown, which rcmd+Space opens next. Kept in
 -- a file so it outlasts Noctalia restarts.
 local MODE_FILE = (noctalia.getenv("XDG_STATE_HOME") or ((noctalia.getenv("HOME") or "") .. "/.local/state"))
   .. "/noctalia/switcher-mode"
@@ -489,8 +489,10 @@ lastMode = PANEL_IDS[lastMode and lastMode:match("%l+")] and lastMode:match("%l+
 noctalia.state.watch(OPEN_KEY, function(value)
   panelOpen = PANEL_IDS[value] ~= nil
   if panelOpen then
+    -- A list opened by a letter isn't a choice of view; Space from there is.
+    local byLetter = openingUntil ~= 0
     openingUntil = 0
-    if value ~= lastMode then
+    if not byLetter and value ~= lastMode then
       lastMode = value
       noctalia.writeFile(MODE_FILE, value .. "\n")
     end
@@ -504,7 +506,7 @@ end)
 -- other panel and a letter goes to the panel as if typed there (niri takes
 -- rcmd+letter before the panel sees it). With none open, Space opens the
 -- panel shown last (lastMode); a letter that is a whole label focuses its
--- window, and one that starts longer labels opens that panel with it typed.
+-- window, and one that starts longer labels opens the list with it typed.
 local keyCount = 0
 function onIpc(event, payload)
   if event ~= "key" or type(payload) ~= "string" then
@@ -541,7 +543,7 @@ function onIpc(event, payload)
     if label:sub(1, 1) == key then
       noctalia.state.set(PENDING_KEY, key)
       openingUntil = noctalia.nowMs() + 1000
-      noctalia.togglePanel(PANEL_IDS[lastMode])
+      noctalia.togglePanel(PANEL_IDS.compact)
       return
     end
   end

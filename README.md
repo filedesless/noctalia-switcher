@@ -19,7 +19,7 @@ Keys:
 
 - **rcmd+letter** with no panel open: a letter that is a whole label
   focuses its window at once; one that starts longer labels (`s` for `st`
-  steam and `sp` Spotify) opens the switcher with it typed. With a panel
+  steam and `sp` Spotify) opens the list with it typed. With a panel
   open, it counts as typed there; typing without rcmd works too.
 - **rcmd+Space** opens the switcher. It opens as the list or the minimap,
   whichever you used last (kept in `~/.local/state/noctalia/switcher-mode`).
